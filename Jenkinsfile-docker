@@ -1,0 +1,118 @@
+result='Unknown'
+
+pipeline {
+    agent { label 'CR1-API-DEV' }
+	tools{
+		maven 'MAVEN'
+		jdk 'JDK_8'
+	}
+	environment {
+    	JENKINS_NODE_COOKIE = "dontKillMe" // To avoid killing running programs after finishing jenkinsfile execution
+	}
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    stages {
+
+        stage('CLEAN') {
+            steps {
+                // Clean the workspace
+				echo 'STAGE: Clean Workspace'
+				sh 'rm -rf target/'
+            }
+        }
+
+        stage('BUILD') {
+            steps {
+                // build
+				echo 'STAGE: BUILD'
+				withMaven() {
+					sh 'mvn clean install -DskipTests'
+				}
+				
+				sh '''
+					if [ -e target/hello-world-0.0.1-SNAPSHOT.jar ]
+					then
+						echo "hello-world-0.0.1-SNAPSHOT.jar created. Maven Compilation success"
+					else
+						error "BUILD Failed"
+					fi
+				'''
+            }
+        }
+		
+		stage('DEPLOY') {
+		
+			
+            steps {
+			
+				script{
+				
+
+			def agentLabel
+			echo env.GIT_BRANCH
+			if (env.GIT_BRANCH.contains("master")) {
+				echo '###################################		1'
+				agentLabel = "CR1-API-DEV"
+			} else if (env.GIT_BRANCH.contains("master")) {
+				echo '###################################		2'
+				agentLabel = "CR1-API-DEV"
+			} else{
+				echo '###################################		3'
+				agentLabel = "CR1-API-DEV"
+			}
+
+		//agent { label agentLabel }
+		
+                // DEPLOY on environment
+				echo 'STAGE: DEPLOY'
+				echo 'branch ...' + env.GIT_BRANCH
+				try{
+					// stop running docker
+					sh 'docker stop hello-world-container'
+					sh 'docker rm hello-world-container'
+				}
+				catch(Exception ex) {
+				}
+				
+				try{
+					
+						sh 'docker build -t hello-world-container .'
+						sh 'docker run -d --name hello-world-container -p 7788:8080 hello-world-container'
+					
+				}
+				catch(Exception ex) {
+					error "DEPLOY FAILED"
+				}
+            }
+			}
+        }
+		
+    }//Stages
+
+    post {
+        success {
+            echo "SUCCESS"
+        }
+        unstable {
+            echo "UNSTABLE"
+        }
+        failure {
+            echo "FAILURE"
+        }
+        changed {
+            echo "Status Changed: [From: $currentBuild.previousBuild.result, To: $currentBuild.result]"
+        }
+        always {
+            script {
+				
+				result = currentBuild.result
+                echo "Final Result is : $result"
+            }
+        }
+    }
+
+}//pipeline

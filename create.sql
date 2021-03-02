@@ -1,0 +1,1 @@
+create table project (id int IDENTITY(1,1) NOT NULL, name varchar(50), url varchar(100), CONSTRAINT PK_project PRIMARY KEY (id))

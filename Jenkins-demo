@@ -1,0 +1,206 @@
+result='Unknown'
+pipeline {
+    agent { label 'CR1-API-DEV' }
+	tools{
+		maven 'MAVEN'
+		jdk 'JDK_8'
+	}
+	environment {
+    	JENKINS_NODE_COOKIE = "dontKillMe" // To avoid killing running programs after finishing jenkinsfile execution
+	}
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                // Clean the workspace
+				echo 'STAGE: Clean Workspace'
+				sh 'rm -rf target/'
+            }
+        }
+
+        stage('CHECKOUT') {
+            steps {
+                // clone your project
+				echo 'STAGE: CHECKOUT. Check-out using Declarative: Checkout SCM'
+            }
+        }
+
+        stage('BUILD') {
+            steps {
+                // build
+				echo 'STAGE: BUILD'
+				withMaven() {
+					sh 'mvn clean install -DskipTests'
+				}
+				
+				sh '''
+					if [ -e target/hello-world-0.0.1-SNAPSHOT.jar ]
+					then
+						echo "hello-world-0.0.1-SNAPSHOT.jar created. BUILD Success"
+					else
+						error "BUILD Failed"
+					fi
+				'''
+            }
+        }
+
+        stage('TEST') {
+            steps {
+                // Test (Unit test / Automation test / etc.)
+				echo 'STAGE: TEST. Covered in Maven'
+            }
+        }
+
+        stage('STATIC ANALYSIS') {
+            steps {
+			script{
+                // Static Code analysis (CppCheck / SonarQube / etc.)
+				echo 'STAGE: STATIC ANALYSIS. SONAR QUBE SCAN'
+				try {
+					withMaven() {
+						//sh 'mvn sonar:sonar -Dsonar.projectKey=CATAPI -Dsonar.host.url=http://10.2.225.157:9000 -Dsonar.login=e6f8e25eab77e3d02be0ee887e1345e82ca10827'
+					}
+				}
+				catch(Exception ex) {
+					error "SONAR SCAN Failed"
+				}
+            }
+			}
+        }
+
+        stage('RELEASE') {
+            steps {
+                // release (Snapshot / release / etc.)
+				echo 'STAGE: Release. Covered in Maven'
+            }
+        }
+
+        stage('TAG') {
+            steps {
+                // Tag 
+				echo 'STAGE: Tag. Covered in Maven'
+            }
+        }
+
+        stage('DEPLOY') {
+            steps {
+                // Deploy to artifactory / drive etc.
+				echo 'STAGE: Deploy'
+				/* commented. Only for PROD
+				dir('target') {
+				sh '''
+					curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -T catapi.jar "http://10.2.225.157:8081/artifactory/CATAPI-PROD/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/catapi.jar"
+				'''
+				}
+				*/
+				dir('target') {
+				sh '''
+					curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -T hello-world-0.0.1-SNAPSHOT.jar "http://10.2.225.157:8081/artifactory/demo-artifactory/hello-world/hello-world-0.0.1-SNAPSHOT.jar"
+				'''
+				}
+            }
+        }
+		
+		stage('RUN') {
+			// Only for PROD
+			agent { label 'CR1-API-02-PROD' }
+			options { skipDefaultCheckout() }
+            steps {
+				script{
+                // Run on environment
+				echo 'STAGE: RUN'
+				try{
+					// stop previously running App
+					//sh 'curl -X POST http://localhost:9091/actuator/shutdown'
+					sh 'curl -X POST http://localhost:7777/actuator/shutdown'
+				}
+				catch(Exception ex) {
+				}
+				
+				try{
+					// Download JAR from Artifactory
+					//sh '''
+					//	curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -O "http://10.2.225.157:8081/artifactory/CATAPI-PROD/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/catapi.jar"
+					//'''
+					
+					sh '''
+						curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -O "http://10.2.225.157:8081/artifactory/demo-artifactory/hello-world/hello-world-0.0.1-SNAPSHOT.jar"
+					'''
+					// Run the App
+					
+					//sh 'nohup java -Dspring.profiles.active=dev -Dspring.cloud.config.label=master -Duser.timezone=America/Chicago -jar catapi.jar com.crst.api.catapi.CatAPIApplication >/dev/null 2>&1 &'
+					
+					
+					sh 'nohup java -Dserver.port=7777 -jar hello-world-0.0.1-SNAPSHOT.jar &'
+					
+					
+				}
+				catch(Exception ex) {
+					error "RUN FAILED"
+				}
+            }
+			}
+        }
+
+       stage('NOTIFY') {
+            steps {
+                // Email recipients of success / failure of job
+				echo 'STAGE: Notify. Covered in Post'
+            }
+        }
+		
+    }//Stages
+
+    post {
+        success {
+            echo "SUCCESS"
+        }
+        unstable {
+            echo "UNSTABLE"
+        }
+        failure {
+            echo "FAILURE"
+        }
+        changed {
+            echo "Status Changed: [From: $currentBuild.previousBuild.result, To: $currentBuild.result]"
+        }
+        always {
+            script {
+				//send Status mail
+				//notifyBuild(currentBuild.result)
+				result = currentBuild.result
+                echo "Final Result is : $result"
+            }
+        }
+    }
+
+}//pipeline
+
+def notifyBuild(String buildStatus) {
+
+  def colorName = 'RED'
+  def colorCode = '#FF0000'
+  def subject = "${buildStatus}: Job ${env.JOB_NAME} [${env.BUILD_NUMBER}]"
+  def summary = "${subject} (${env.BUILD_URL})"
+  def details = """
+	${buildStatus}: Job ${env.JOB_NAME} [${env.BUILD_NUMBER}]:
+
+
+    
+	Check console output at ${env.BUILD_URL}consoleText
+
+"""
+
+  // Send notifications
+  emailext (
+      subject: subject,
+      body: details,
+	  to: 'GGoodale@CRST.com'
+    )
+}

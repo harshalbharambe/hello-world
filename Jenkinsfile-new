@@ -1,0 +1,71 @@
+properties([[$class: 'ParametersDefinitionProperty', parameterDefinitions: [
+  [$class: 'hudson.model.StringParameterDefinition', name: 'PHASE', defaultValue: 'ALL', description: 'Enter a phase'],
+  [$class: 'hudson.model.StringParameterDefinition', name: 'BUILD_ENVN', defaultValue: 'TEST', description: 'Enter the environment; TEST or PROD']
+  ]]])
+  mailFlag= 'UNKNOWN'
+pipeline {
+  agent none
+  
+  environment {
+      JENKINS_NODE_COOKIE = "dontKillMe" // To avoid killing running programs after finishing jenkinsfile execution
+  }
+  /* options { skipDefaultCheckout() } */
+
+  stages{
+    stage("BUILD"){
+	
+	agent { 
+			label 'CR1-API-DEV'
+		}
+			
+			
+      when {
+        expression { return ("${params.PHASE}" =~ /(BUILD*)/ || "${params.PHASE}" == "ALL" ) }
+      }
+      steps {
+        script{
+          echo 'from CR1-API-DEV'
+        
+		 withMaven(maven:'MAVEN') {
+         }	
+		// Create an Artifactory server instance, as described above in this article:
+		def server = Artifactory.server('CRST_ARTIFACTORY')
+		// Create and set an Artifactory Maven Build instance:
+		def rtMaven = Artifactory.newMavenBuild()
+		rtMaven.resolver server: server, releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot'
+		rtMaven.deployer server: server, releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local'
+		// Optionally include or exclude artifacts to be deployed to Artifactory:
+		rtMaven.deployer.artifactDeploymentPatterns.addInclude("frog*").addExclude("*.zip")
+		// Set a Maven Tool defined in Jenkins "Manage":
+		//rtMaven.tool = MAVEN
+		// Optionally set Maven Ops
+		rtMaven.opts = '-Xms1024m -Xmx4096m'
+		// Run Maven:
+		//def buildInfo = rtMaven.run pom: 'pom.xml', goals: 'clean install'
+		// Alternatively, you can pass an existing build-info instance to the run method:
+		// rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean install', buildInfo: buildInfo
+		 
+		// Publish the build-info to Artifactory:
+		//server.publishBuildInfo buildInfo
+		
+		
+
+        }
+      }
+    }
+
+    stage("RUNAPP"){
+
+      when {
+        expression { return ("${params.PHASE}" =~ /(RUNAPP*)/ || "${params.PHASE}" == "ALL" ) }
+      }
+      steps {
+script{
+          echo 'from CR1-BATCH-DEV'
+         //sh 'hostname' 	
+
+        }
+      }
+    }
+  }//stages
+}//pipeline

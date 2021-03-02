@@ -1,0 +1,170 @@
+result='Unknown'
+agentLabel=''
+BUILD_ENV='DEV'
+JAVA_OPTS_LIST=''
+
+pipeline {
+    agent { label 'CR1-CICD-DEV' }
+	tools{
+	maven 'MAVEN'
+	jdk 'JDK_8'
+	}
+	environment {
+    JENKINS_NODE_COOKIE = "dontKillMe" // To avoid killing running programs after finishing jenkinsfile execution
+	}
+    options {
+	timeout(time: 60, unit: 'MINUTES')
+	buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    stages {
+		
+        stage('BUILD') {
+		steps {
+			// build
+			echo 'STAGE: BUILD'
+			withMaven() {
+				sh 'mvn clean install -DskipTests'
+			}
+			sh '''
+				if [ -e target/hello-world-0.0.1-SNAPSHOT.jar ]
+				then
+					echo "hello-world-0.0.1-SNAPSHOT.jar created. Maven Compilation success"
+				else
+					error "BUILD Failed"
+				fi
+			'''
+		}
+        }
+		
+        stage('STATIC ANALYSIS') {
+		steps {
+		script{
+			// Static Code analysis (SonarQube)
+			echo 'STAGE: STATIC ANALYSIS. SONAR QUBE SCAN'
+			try {
+				withMaven() {
+					//sh 'mvn sonar:sonar -Dsonar.projectKey=CATAPI -Dsonar.host.url=http://sonarqube.crst.com/ -Dsonar.login=e6f8e25eab77e3d02be0ee887e1345e82ca10827'
+				}
+			}
+			catch(Exception ex) {
+				error "SONAR SCAN Failed"
+			}
+		}
+		}
+        }
+		stage('RELEASE') {
+		steps {
+			script{
+			echo 'STAGE: RELEASE'
+			try{
+				// Detect the Bitbucket branch and agent accordingly to DEPLOY the application on Docker
+			if (env.GIT_BRANCH.contains("master")) {
+				agentLabel = "CR1-API-01"
+				BUILD_ENV = 'PROD'
+				JAVA_OPTS_LIST = "-Dcom.example.message=HelloooooooooooooPROD"
+			} else if (env.GIT_BRANCH.contains("develop")) {
+				agentLabel = "CR1-API-DEV"
+				BUILD_ENV = 'DEV'
+				JAVA_OPTS_LIST = "-Dcom.example.message=HelloooooooooooooDEV"
+			} else{
+				agentLabel = "CR1-API-DEV"
+				BUILD_ENV = 'DEV'
+				JAVA_OPTS_LIST = "-Dcom.example.message=HelloooooooooooooDEV"
+			}
+			}catch(Exception ex) {	
+			}
+			
+			dir ('target') { 
+				sh "curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -T hello-world-0.0.1-SNAPSHOT.jar \"http://artifactory.crst.com/artifactory/demo-artifactory/${BUILD_ENV}/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/hello-world-0.0.1-SNAPSHOT.jar\""
+			}
+			
+			sh "curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -T Dockerfile \"http://artifactory.crst.com/artifactory/demo-artifactory/${BUILD_ENV}/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/Dockerfile\""
+			
+			}
+		}
+        }
+		stage('DEPLOY') {
+		agent { label agentLabel }
+		options { skipDefaultCheckout() }
+		steps {
+			script{
+			// Deploy on 'agentLabel' environment
+			echo 'STAGE: DEPLOY'
+			try{
+				// stop existing running docker container
+				sh 'docker stop hello-world-2'
+				sh 'docker rm hello-world-2'
+			}
+			catch(Exception ex) {
+			}
+			try{
+				
+			dir ('target') { 
+			sh "curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -O \"http://artifactory.crst.com/artifactory/demo-artifactory/${BUILD_ENV}/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/hello-world-0.0.1-SNAPSHOT.jar\""
+			}
+			// Download Dockerfile file from Artifactory
+			sh "curl -uadmin:AP84CVG5TZckJimP4wxYRC6Evdb -O \"http://artifactory.crst.com/artifactory/demo-artifactory/${BUILD_ENV}/${BUILD_TIMESTAMP}/${BUILD_NUMBER}/Dockerfile\""
+			
+			//Create and Run CAT API Container and the App.
+			sh 'docker build -t hello-world-2 .'
+			
+			sh "docker run -d --name hello-world-2 --env JAVA_OPTS=\"${JAVA_OPTS_LIST}\" -p 7778:8080 hello-world-2"
+				
+			}
+			catch(Exception ex) {
+				error "DEPLOY FAILED"
+			}
+		}
+		}
+        }
+		
+    }//Stages
+
+    post {
+        success {
+            echo "SUCCESS"
+        }
+        unstable {
+            echo "UNSTABLE"
+        }
+        failure {
+            echo "FAILURE"
+        }
+        changed {
+            echo "Status Changed: [From: $currentBuild.previousBuild.result, To: $currentBuild.result]"
+        }
+        always {
+            script {
+				//send Status mail
+				//notifyBuild(currentBuild.result)
+				result = currentBuild.result
+                echo "Final Result is : $result"
+            }
+        }
+    }
+
+}//pipeline
+
+def notifyBuild(String buildStatus) {
+
+  def colorName = 'RED'
+  def colorCode = '#FF0000'
+  def subject = "${buildStatus}: Job ${env.JOB_NAME} [${env.BUILD_NUMBER}]"
+  def summary = "${subject} (${env.BUILD_URL})"
+  def details = """
+	${buildStatus}: Job ${env.JOB_NAME} [${env.BUILD_NUMBER}]:
+
+
+    
+	Check console output at ${env.BUILD_URL}consoleText
+
+"""
+
+  // Send notifications
+  emailext (
+      subject: subject,
+      body: details,
+	  to: 'GGoodale@CRST.com'
+    )
+}

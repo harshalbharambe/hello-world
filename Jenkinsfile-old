@@ -1,0 +1,36 @@
+result='Unknown'
+agentLabel=''
+BUILD_ENV='DEV'
+JAVA_OPTS_LIST=''
+
+pipeline {
+    agent { label 'CR1-CICD-DEV' }
+	tools{
+	maven 'MAVEN'
+	jdk 'JDK_8'
+	}
+	environment {
+    JENKINS_NODE_COOKIE = "dontKillMe" // To avoid killing running programs after finishing jenkinsfile execution
+	}
+    options {
+	timeout(time: 60, unit: 'MINUTES')
+	buildDiscarder(logRotator(numToKeepStr: '5'))
+    }
+
+    stages {
+
+		stage('PREPARE') {
+		steps {
+			script{
+			echo 'STAGE: PREPARE'
+			try{
+				sh 'docker ps'
+			}catch(Exception ex) {	
+			}
+			
+			}
+		}
+        }
+    }//Stages
+
+}//pipeline
